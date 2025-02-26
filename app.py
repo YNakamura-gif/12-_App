@@ -1,12 +1,12 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 import os
 import json
+from datetime import datetime
 
 # ページ設定
 st.set_page_config(
-    page_title="12条点検Webアプリ",
+    page_title="12条点検 Web アプリ",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -18,10 +18,17 @@ if 'temp_data' not in st.session_state:
 # マスターデータの読み込み
 def load_deterioration_master():
     try:
-        df = pd.read_csv("deterioration_master.csv")
-        return df.groupby('部位')['劣化内容'].apply(list).to_dict()
+        df = pd.read_csv("deterioration_master.csv", encoding="shift_jis")  # エンコーディングを指定
+        return df
     except FileNotFoundError:
-        return {}
+        st.error("deterioration_master.csv ファイルが見つかりません。")
+        return pd.DataFrame()
+    except UnicodeDecodeError:
+        st.error("CSVファイルのエンコーディングが正しくありません。")
+        return pd.DataFrame()
+    except KeyError:
+        st.error("CSVファイルに必要な列がありません。")
+        return pd.DataFrame()
 
 # アプリケーションのヘッダー
 st.title("12条点検 Web アプリ")
@@ -41,51 +48,25 @@ with tab1:
         location = st.text_input("現場ID", key="location")
         weather = st.selectbox("天候", ["晴れ", "曇り", "雨"], key="weather")
 
-    # 建物外観セクション
-    st.subheader("建物外観")
-    crack = st.radio("外壁のひび割れ", ["なし", "小", "中", "大"], key="crack")
-    paint = st.radio("塗装状態", ["良好", "劣化", "剥がれ"], key="paint")
-    rust = st.radio("鉄部の錆", ["なし", "小", "中", "大"], key="rust")
-    
-    # 建物内部セクション
-    st.subheader("建物内部")
-    water_leak = st.radio("雨漏り", ["なし", "あり"], key="water_leak")
-    interior_crack = st.radio("内壁のひび割れ", ["なし", "小", "中", "大"], key="interior_crack")
-    
     # 劣化内容セクション
     st.subheader("劣化内容")
     deterioration_master = load_deterioration_master()
     
-    # 部位ごとの劣化内容選択
-    for location_type, deteriorations in deterioration_master.items():
-        st.write(f"【{location_type}】")
-        selected_deteriorations = st.multiselect(
-            f"{location_type}の劣化内容",
-            options=deteriorations,
-            key=f"deterioration_{location_type}"
-        )
-        
-        # 選択された劣化がある場合、詳細入力を表示
-        for det in selected_deteriorations:
+    if not deterioration_master.empty:
+        parts = deterioration_master['部位'].unique()
+        deteriorations = deterioration_master['劣化内容'].unique()
+
+        # 1から100までの番号を用意
+        for i in range(1, 101):
+            st.write(f"【劣化 {i}】")
             col1, col2 = st.columns(2)
             with col1:
-                st.text_input(f"{det}の程度", key=f"degree_{det}")
+                part = st.selectbox(f"部位 {i}", options=parts, key=f"part_{i}")
             with col2:
-                st.text_input(f"{det}の場所", key=f"location_{det}")
-
-    # その他の劣化内容
-    st.write("【その他の劣化】")
-    other_deterioration = st.text_area(
-        "上記以外の劣化内容",
-        key="other_deterioration"
-    )
+                deterioration = st.selectbox(f"劣化名 {i}", options=deteriorations, key=f"deterioration_{i}")
 
     # 備考
     comments = st.text_area("備考", key="comments")
-
-    # 写真アップロード
-    st.subheader("写真アップロード")
-    uploaded_files = st.file_uploader("点検箇所の写真", accept_multiple_files=True)
 
     # 保存処理
     if st.button("保存", type="primary"):
@@ -94,25 +75,14 @@ with tab1:
         else:
             # 劣化データの収集
             deterioration_data = {}
-            for loc in deterioration_master.keys():
-                selected = st.session_state.get(f"deterioration_{loc}", [])
-                details = {}
-                for det in selected:
-                    details[det] = {
-                        "程度": st.session_state.get(f"degree_{det}", ""),
-                        "場所": st.session_state.get(f"location_{det}", "")
+            for i in range(1, 101):
+                part = st.session_state.get(f"part_{i}", "")
+                deterioration = st.session_state.get(f"deterioration_{i}", "")
+                if part and deterioration:
+                    deterioration_data[f"劣化 {i}"] = {
+                        "部位": part,
+                        "劣化名": deterioration
                     }
-                deterioration_data[loc] = details
-
-            # 写真の保存
-            photo_paths = []
-            if uploaded_files:
-                for file in uploaded_files:
-                    file_path = f"photos/{location}_{date}_{file.name}"
-                    os.makedirs("photos", exist_ok=True)
-                    with open(file_path, "wb") as f:
-                        f.write(file.getbuffer())
-                    photo_paths.append(file_path)
 
             # 基本データとの結合
             base_data = {
@@ -121,8 +91,6 @@ with tab1:
                 "点検者名": inspector,
                 "天候": weather,
                 "劣化データ": json.dumps(deterioration_data, ensure_ascii=False),
-                "その他劣化": other_deterioration,
-                "写真": ",".join(photo_paths),
                 "備考": comments
             }
             
