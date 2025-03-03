@@ -30,6 +30,15 @@ def load_deterioration_master():
         st.error("CSVファイルに必要な列がありません。")
         return pd.DataFrame()
 
+# 予測変換リストの読み込み
+def load_prediction_list():
+    try:
+        df = pd.read_csv("prediction_list.csv", encoding="shift_jis")
+        return df
+    except FileNotFoundError:
+        st.error("prediction_list.csv ファイルが見つかりません。")
+        return pd.DataFrame()
+
 # アプリケーションのヘッダー
 st.title("12条点検 Web アプリ")
 st.write("このアプリは点検データを入力し、CSV出力するためのシステムです。")
@@ -51,6 +60,7 @@ with tab1:
     # 劣化内容セクション
     st.subheader("劣化内容")
     deterioration_master = load_deterioration_master()
+    prediction_list = load_prediction_list()
     
     if not deterioration_master.empty:
         parts = deterioration_master['部位'].unique()
@@ -63,7 +73,12 @@ with tab1:
             with col1:
                 part = st.selectbox(f"部位 {i}", options=parts, key=f"part_{i}")
             with col2:
-                deterioration = st.selectbox(f"劣化名 {i}", options=deteriorations, key=f"deterioration_{i}")
+                # 予測変換機能付きの入力フィールド
+                deterioration_input = st.text_input(f"劣化名 {i}", key=f"deterioration_{i}")
+                if prediction_list is not None and not prediction_list.empty:
+                    suggestions = prediction_list[prediction_list['initial'] == deterioration_input[:1]]['suggestion'].tolist()
+                    if suggestions:
+                        st.write(f"候補: {', '.join(suggestions)}")
 
     # 備考
     comments = st.text_area("備考", key="comments")
@@ -100,10 +115,15 @@ with tab1:
             csv_path = "data/inspection_data.csv"
             os.makedirs("data", exist_ok=True)
             
-            if not os.path.exists(csv_path):
+            # 上書きか追記かの選択オプション
+            save_option = st.radio("保存オプション", ("追記", "上書き"), index=0)
+            if save_option == "上書き":
                 df.to_csv(csv_path, index=False, encoding="utf-8-sig")
             else:
-                df.to_csv(csv_path, mode="a", index=False, header=False, encoding="utf-8-sig")
+                if not os.path.exists(csv_path):
+                    df.to_csv(csv_path, index=False, encoding="utf-8-sig")
+                else:
+                    df.to_csv(csv_path, mode="a", index=False, header=False, encoding="utf-8-sig")
             
             st.success("データを保存しました！")
 
